@@ -31,14 +31,19 @@ from image_card import make_public_image_url
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("ig-market-bot")
 
-# ---- required environment variables ----
+# ---- required to run at all ----
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
-IG_USER_ID = os.environ["IG_USER_ID"]
-IG_ACCESS_TOKEN = os.environ["IG_ACCESS_TOKEN"]
 
-# ---- optional ----
+# ---- optional until you're ready to actually publish to Instagram ----
+# The bot will start and send you drafts on Telegram without these. Tapping
+# "Approve & Post" before they're set just shows a clear error instead of
+# crashing the whole bot.
+IG_USER_ID = os.environ.get("IG_USER_ID")
+IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN")
+IMGBB_API_KEY_SET = bool(os.environ.get("IMGBB_API_KEY"))
+
 RUN_INTERVAL_HOURS = float(os.environ.get("RUN_INTERVAL_HOURS", "4"))
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
@@ -110,6 +115,16 @@ def call_claude(headlines: list[dict]) -> dict:
 
 
 def post_to_instagram(caption: str, image_url: str) -> dict:
+    if not (IG_USER_ID and IG_ACCESS_TOKEN):
+        raise RuntimeError(
+            "Instagram isn't set up yet — IG_USER_ID and IG_ACCESS_TOKEN are missing. "
+            "Add them in Railway's Variables tab once you've completed the Meta setup."
+        )
+    if not IMGBB_API_KEY_SET:
+        raise RuntimeError(
+            "IMGBB_API_KEY is missing — needed to host the post image publicly. "
+            "Add it in Railway's Variables tab."
+        )
     container = requests.post(
         f"https://graph.facebook.com/v21.0/{IG_USER_ID}/media",
         data={"image_url": image_url, "caption": caption, "access_token": IG_ACCESS_TOKEN},
@@ -186,6 +201,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == "reject":
         await query.edit_message_text("❌ Rejected — nothing was posted.")
+        return
+
+    if not (IG_USER_ID and IG_ACCESS_TOKEN and IMGBB_API_KEY_SET):
+        await query.edit_message_text(
+            "⚠️ Instagram isn't fully set up yet (missing IG_USER_ID, IG_ACCESS_TOKEN, "
+            "and/or IMGBB_API_KEY in Railway). This draft was approved but not posted — "
+            "add those variables and try again next cycle."
+        )
         return
 
     await query.edit_message_text("⏳ Posting to Instagram...")
